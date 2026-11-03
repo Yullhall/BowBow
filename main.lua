@@ -1,5 +1,5 @@
 --[[\
-    Berry Avenue Outfit Inspector & Manager (Stabilized Batch Equipping)
+    Berry Avenue Outfit Inspector & Manager (Clean Boot & Stabilized)
 ]]--
 
 -- Anti-Kick / Anti-Ban Metatable Hook
@@ -608,7 +608,7 @@ local function displaySavedOutfitsMenu()
 				task.spawn(function()
 					for _, item in ipairs(outfitData.Items) do
 						equipItemStabilized(item)
-						task.wait(0.12) -- Balanced delay so the character engine processes each part
+						task.wait(0.12)
 					end
 				end)
 				equipAllSavedBtn.Text = "Done!"
@@ -673,4 +673,69 @@ equipAllInspectedBtn.MouseButton1Click:Connect(function()
 end)
 
 viewModeButton.MouseButton1Click:Connect(function()
-	showingSavedOutfits
+	showingSavedOutfitsMenu = not showingSavedOutfitsMenu
+	if showingSavedOutfitsMenu then
+		viewModeButton.Text = "🔍 Back to Inspector"
+		displaySavedOutfitsMenu()
+	else
+		viewModeButton.Text = "📂 View Saved Outfits (" .. #savedOutfits .. ")"
+		if currentSelectedPlayer then
+			displayItems(getPlayerOutfit(currentSelectedPlayer))
+		end
+	end
+end)
+
+minimizeButton.MouseButton1Click:Connect(function()
+	mainFrame.Visible = false
+	minButton.Visible = true
+	minButton.Position = mainFrame.Position
+end)
+
+minButton.MouseButton1Click:Connect(function()
+	mainFrame.Visible = true
+	minButton.Visible = false
+end)
+
+refreshButton.MouseButton1Click:Connect(refreshPlayerList)
+refreshPlayerList()
+
+saveButton.MouseButton1Click:Connect(function()
+	if #selectedPlayerItems > 0 then
+		local outfitTitle = currentSelectedPlayer and (currentSelectedPlayer.Name .. "'s Outfit") or ("Outfit #" .. (#savedOutfits + 1))
+		
+		local cleanItems = {}
+		for _, item in ipairs(selectedPlayerItems) do
+			table.insert(cleanItems, {
+				Name = item.Name,
+				ID = item.ID,
+				Type = item.Type,
+				Object = item.Object
+			})
+		end
+
+		table.insert(savedOutfits, {
+			Title = outfitTitle,
+			Items = cleanItems
+		})
+		
+		viewModeButton.Text = showingSavedOutfitsMenu and "🔍 Back to Inspector" or ("📂 View Saved Outfits (" .. #savedOutfits .. ")"
+		saveButton.Text = "Saved! 💖"
+		task.delay(1.5, function()
+			if saveButton and saveButton.Parent then saveButton.Text = "💖 Save Outfit" end
+		end)
+	end
+end)
+
+unequipAllButton.MouseButton1Click:Connect(function()
+	if LocalPlayer.Character then
+		for _, v in ipairs(LocalPlayer.Character:GetChildren()) do
+			if v:IsA("Accessory") or v:IsA("Shirt") or v:IsA("Pants") or v:IsA("BodyColors") or v:IsA("Clothing") then
+				v:Destroy()
+			end
+		end
+		unequipAllButton.Text = "Stripped! ✨"
+		task.delay(1.5, function()
+			if unequipAllButton and unequipAllButton.Parent then unequipAllButton.Text = "🧹 Unequip All" end
+		end)
+	end
+end)
