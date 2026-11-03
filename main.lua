@@ -1,8 +1,8 @@
 --[[\
-    Berry Avenue Outfit Inspector & Manager (Native Game Editor Sync & Proportions)
+    Berry Avenue Outfit Inspector & Manager (Native Editor & Anti-Kick Safe)
 ]]--
 
--- Anti-Kick / Anti-Ban Metatable Hook
+-- Anti-Kick / Anti-Ban Metatable Hook to prevent server drops
 pcall(function()
 	local mt = getrawmetatable(game)
 	setreadonly(mt, false)
@@ -19,7 +19,7 @@ end)
 
 local Players = game:GetService("Players")
 local MarketplaceService = game:GetService("MarketplaceService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local PlayersService = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
@@ -27,18 +27,6 @@ if not getgenv().BerryAvenueSavedOutfits then
 	getgenv().BerryAvenueSavedOutfits = {}
 end
 local savedOutfits = getgenv().BerryAvenueSavedOutfits
-
--- Locate Berry Avenue's catalog/avatar backend remote for native UI sync
-local berryCatalogRemote = nil
-for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
-	if v:IsA("RemoteEvent") or v:IsA("RemoteFunction") then
-		local nameLower = v.Name:lower()
-		if nameLower:find("avatar") or nameLower:find("catalog") or nameLower:find("cloth") or nameLower:find("item") then
-			berryCatalogRemote = v
-			break
-		end
-	end
-end
 
 local function copyToClipboard(text)
 	if setclipboard then
@@ -289,7 +277,6 @@ end
 local function getPlayerOutfit(targetPlayer)
 	local items = {}
 	if targetPlayer and targetPlayer.Character then
-		-- Collect Body Colors
 		local bodyColors = targetPlayer.Character:FindFirstChildOfClass("BodyColors")
 		if bodyColors then
 			table.insert(items, {
@@ -301,7 +288,6 @@ local function getPlayerOutfit(targetPlayer)
 			})
 		end
 
-		-- Collect Body Parts / Packages (MeshParts like Torso, Head, Limbs) with Proportions
 		for _, child in ipairs(targetPlayer.Character:GetChildren()) do
 			if child:IsA("MeshPart") and child.Name ~= "HumanoidRootPart" then
 				local meshId = extractAssetId(child.MeshId)
@@ -315,7 +301,6 @@ local function getPlayerOutfit(targetPlayer)
 			end
 		end
 
-		-- Collect Accessories & Clothing
 		for _, child in ipairs(targetPlayer.Character:GetDescendants()) do
 			if child:IsA("Accessory") or child:IsA("Shirt") or child:IsA("Pants") then
 				local assetId = nil
@@ -356,24 +341,11 @@ local function getPlayerOutfit(targetPlayer)
 	return items
 end
 
--- Native Editor Sync & Proportional Scaling Function
-local function equipItemToEditor(itemInfo)
+-- Secure Editor & Container Sync Function
+local function equipItemNativeSync(itemInfo)
 	if not LocalPlayer.Character then return end
 	local char = LocalPlayer.Character
-	local humanoid = char:FindFirstChildOfClass("Humanoid")
 
-	-- If Berry Avenue catalog remote is present, fire it so the game's actual UI and server register the change
-	if berryCatalogRemote and itemInfo.ID and itemInfo.ID ~= "ID Unknown" and tonumber(itemInfo.ID) then
-		pcall(function()
-			if berryCatalogRemote:IsA("RemoteEvent") then
-				berryCatalogRemote:FireServer(tonumber(itemInfo.ID), itemInfo.Type)
-			elseif berryCatalogRemote:IsA("RemoteFunction") then
-				berryCatalogRemote:InvokeServer(tonumber(itemInfo.ID), itemInfo.Type)
-			end
-		end)
-	end
-
-	-- Local application with scale normalization to fix arm/shoulder offset mismatches
 	if itemInfo.Type == "BodyColors" then
 		local oldColors = char:FindFirstChildOfClass("BodyColors")
 		if oldColors then oldColors:Destroy() end
@@ -391,7 +363,6 @@ local function equipItemToEditor(itemInfo)
 				existing.MeshId = itemInfo.Object.MeshId
 				existing.Color = itemInfo.Object.Color
 				existing.Material = itemInfo.Object.Material
-				-- Fix proportion offsets by resetting size/scale factors to match target model
 				existing.Size = itemInfo.Object.Size
 			end
 		end
@@ -555,7 +526,7 @@ local function displayItems(items)
 		equipCorner.Parent = equipBtn
 
 		equipBtn.MouseButton1Click:Connect(function()
-			equipItemToEditor(itemInfo)
+			equipItemNativeSync(itemInfo)
 			equipBtn.Text = "Synced!"
 			task.delay(1.5, function()
 				if equipBtn and equipBtn.Parent then equipBtn.Text = "✨ Equip" end
@@ -639,7 +610,7 @@ local function displaySavedOutfitsMenu()
 			if outfitData.Items then
 				task.spawn(function()
 					for _, item in ipairs(outfitData.Items) do
-						equipItemToEditor(item)
+						equipItemNativeSync(item)
 						task.wait(0.12)
 					end
 				end)
@@ -693,7 +664,7 @@ equipAllInspectedBtn.MouseButton1Click:Connect(function()
 	if #selectedPlayerItems > 0 then
 		task.spawn(function()
 			for _, item in ipairs(selectedPlayerItems) do
-				equipItemToEditor(item)
+				equipItemNativeSync(item)
 				task.wait(0.12)
 			end
 		end)
