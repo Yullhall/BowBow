@@ -1,5 +1,5 @@
 --[[\
-    Berry Avenue Outfit Inspector & Manager (FE Universal / Server-Replicated)
+    Berry Avenue Outfit Inspector & Manager (Stabilized Batch Equipping)
 ]]--
 
 -- Anti-Kick / Anti-Ban Metatable Hook
@@ -287,6 +287,19 @@ local function getPlayerOutfit(targetPlayer)
 			})
 		end
 
+		for _, child in ipairs(targetPlayer.Character:GetChildren()) do
+			if child:IsA("MeshPart") and child.Name ~= "HumanoidRootPart" then
+				local meshId = extractAssetId(child.MeshId)
+				table.insert(items, {
+					Name = child.Name .. " Part",
+					ID = meshId or "ID Unknown",
+					Type = "BodyPart",
+					Object = child:Clone(),
+					IsUnknown = (meshId == nil)
+				})
+			end
+		end
+
 		for _, child in ipairs(targetPlayer.Character:GetDescendants()) do
 			if child:IsA("Accessory") or child:IsA("Shirt") or child:IsA("Pants") then
 				local assetId = nil
@@ -327,11 +340,9 @@ local function getPlayerOutfit(targetPlayer)
 	return items
 end
 
--- Universal FE Server-Replicated Equipping Function
-local function equipItemUniversal(itemInfo)
+local function equipItemStabilized(itemInfo)
 	if not LocalPlayer.Character then return end
 	local char = LocalPlayer.Character
-	local humanoid = char:FindFirstChildOfClass("Humanoid")
 
 	if itemInfo.Type == "BodyColors" then
 		local oldColors = char:FindFirstChildOfClass("BodyColors")
@@ -339,45 +350,26 @@ local function equipItemUniversal(itemInfo)
 		if itemInfo.Object then itemInfo.Object:Clone().Parent = char end
 	elseif itemInfo.Type == "Shirt" then
 		for _, v in ipairs(char:GetChildren()) do if v:IsA("Shirt") then v:Destroy() end end
-		if itemInfo.ID and itemInfo.ID ~= "ID Unknown" then
-			local s = Instance.new("Shirt")
-			s.ShirtTemplate = "rbxassetid://" .. tostring(itemInfo.ID)
-			s.Parent = char
-		elseif itemInfo.Object then
-			itemInfo.Object:Clone().Parent = char
-		end
+		if itemInfo.Object then itemInfo.Object:Clone().Parent = char end
 	elseif itemInfo.Type == "Pants" then
 		for _, v in ipairs(char:GetChildren()) do if v:IsA("Pants") then v:Destroy() end end
-		if itemInfo.ID and itemInfo.ID ~= "ID Unknown" then
-			local p = Instance.new("Pants")
-			p.PantsTemplate = "rbxassetid://" .. tostring(itemInfo.ID)
-			p.Parent = char
-		elseif itemInfo.Object then
-			itemInfo.Object:Clone().Parent = char
+		if itemInfo.Object then itemInfo.Object:Clone().Parent = char end
+	elseif itemInfo.Type == "BodyPart" then
+		if itemInfo.Object then
+			local existing = char:FindFirstChild(itemInfo.Object.Name)
+			if existing and existing:IsA("MeshPart") then
+				existing.MeshId = itemInfo.Object.MeshId
+				existing.Color = itemInfo.Object.Color
+				existing.Material = itemInfo.Object.Material
+			end
 		end
 	elseif itemInfo.Type == "Accessory" or itemInfo.Type == "Model" then
-		if itemInfo.ID and itemInfo.ID ~= "ID Unknown" then
-			pcall(function()
-				local content = game:GetService("InsertService"):LoadAsset(tonumber(itemInfo.ID))
-				if content then
-					for _, acc in ipairs(content:GetChildren()) do
-						if acc:IsA("Accessory") then
-							for _, old in ipairs(char:GetChildren()) do
-								if old:IsA("Accessory") and old.Name == acc.Name then old:Destroy() end
-							end
-							-- Apply directly to local character with proper attachments so others see it
-							acc.Parent = char
-						end
-					end
-				end
-			end)
-		elseif itemInfo.Object then
+		if itemInfo.Object then
 			local clone = itemInfo.Object:Clone()
-			for _, v in ipairs(char:GetChildren()) do
-				if v:IsA("Accessory") and v.Name == clone.Name then v:Destroy() end
-			end
 			local handle = clone:FindFirstChild("Handle")
 			if handle then
+				handle.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+				handle.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
 				for _, w in ipairs(handle:GetChildren()) do
 					if w:IsA("Weld") or w:IsA("WeldConstraint") or w:IsA("Motor6D") then w:Destroy() end
 				end
@@ -427,6 +419,14 @@ local function displayItems(items)
 			placeholderLabel.Size = UDim2.new(1, 0, 1, 0)
 			placeholderLabel.BackgroundTransparency = 1
 			placeholderLabel.Text = "🎨"
+			placeholderLabel.TextSize = 16
+			placeholderLabel.Parent = imgFrame
+		elseif itemInfo.Type == "BodyPart" then
+			itemImg:Destroy()
+			local placeholderLabel = Instance.new("TextLabel")
+			placeholderLabel.Size = UDim2.new(1, 0, 1, 0)
+			placeholderLabel.BackgroundTransparency = 1
+			placeholderLabel.Text = "👤"
 			placeholderLabel.TextSize = 16
 			placeholderLabel.Parent = imgFrame
 		elseif not itemInfo.IsUnknown and itemInfo.ID and itemInfo.ID ~= "ID Unknown" then
@@ -481,7 +481,7 @@ local function displayItems(items)
 		creatorLabel.Font = Enum.Font.GothamMedium
 		creatorLabel.TextXAlignment = Enum.TextXAlignment.Left
 		creatorLabel.TextTruncate = Enum.TextTruncate.AtEnd
-		creatorLabel.Text = itemInfo.Type == "BodyColors" and "Skin Tone" or (itemInfo.IsUnknown and "Creator: Game Asset" or "Creator: Loading...")
+		creatorLabel.Text = (itemInfo.Type == "BodyColors" or itemInfo.Type == "BodyPart") and "Avatar Customization" or (itemInfo.IsUnknown and "Creator: Game Asset" or "Creator: Loading...")
 		creatorLabel.Parent = itemRow
 
 		local idLabel = Instance.new("TextLabel")
@@ -495,7 +495,7 @@ local function displayItems(items)
 		idLabel.Text = "ID: " .. tostring(itemInfo.ID)
 		idLabel.Parent = itemRow
 
-		if not itemInfo.IsUnknown and itemInfo.ID and itemInfo.ID ~= "ID Unknown" and itemInfo.Type ~= "BodyColors" then
+		if not itemInfo.IsUnknown and itemInfo.ID and itemInfo.ID ~= "ID Unknown" and itemInfo.Type ~= "BodyColors" and itemInfo.Type ~= "BodyPart" then
 			task.spawn(function()
 				local success, info = pcall(function()
 					return MarketplaceService:GetProductInfo(tonumber(itemInfo.ID), Enum.InfoType.Asset)
@@ -523,7 +523,7 @@ local function displayItems(items)
 		equipCorner.Parent = equipBtn
 
 		equipBtn.MouseButton1Click:Connect(function()
-			equipItemUniversal(itemInfo)
+			equipItemStabilized(itemInfo)
 			equipBtn.Text = "Done!"
 			task.delay(1.5, function()
 				if equipBtn and equipBtn.Parent then equipBtn.Text = "✨ Equip" end
@@ -605,10 +605,12 @@ local function displaySavedOutfitsMenu()
 
 		equipAllSavedBtn.MouseButton1Click:Connect(function()
 			if outfitData.Items then
-				for _, item in ipairs(outfitData.Items) do
-					equipItemUniversal(item)
-					task.wait(0.1)
-				end
+				task.spawn(function()
+					for _, item in ipairs(outfitData.Items) do
+						equipItemStabilized(item)
+						task.wait(0.12) -- Balanced delay so the character engine processes each part
+					end
+				end)
 				equipAllSavedBtn.Text = "Done!"
 				task.delay(1.5, function()
 					if equipAllSavedBtn and equipAllSavedBtn.Parent then equipAllSavedBtn.Text = "✨ Equip" end
@@ -657,10 +659,12 @@ end
 
 equipAllInspectedBtn.MouseButton1Click:Connect(function()
 	if #selectedPlayerItems > 0 then
-		for _, item in ipairs(selectedPlayerItems) do
-			equipItemUniversal(item)
-			task.wait(0.1)
-		end
+		task.spawn(function()
+			for _, item in ipairs(selectedPlayerItems) do
+				equipItemStabilized(item)
+				task.wait(0.12)
+			end
+		end)
 		equipAllInspectedBtn.Text = "Equipped All! ✨"
 		task.delay(1.5, function()
 			if equipAllInspectedBtn and equipAllInspectedBtn.Parent then equipAllInspectedBtn.Text = "✨ Equip All Items" end
@@ -669,69 +673,4 @@ equipAllInspectedBtn.MouseButton1Click:Connect(function()
 end)
 
 viewModeButton.MouseButton1Click:Connect(function()
-	showingSavedOutfitsMenu = not showingSavedOutfitsMenu
-	if showingSavedOutfitsMenu then
-		viewModeButton.Text = "🔍 Back to Inspector"
-		displaySavedOutfitsMenu()
-	else
-		viewModeButton.Text = "📂 View Saved Outfits (" .. #savedOutfits .. ")"
-		if currentSelectedPlayer then
-			displayItems(getPlayerOutfit(currentSelectedPlayer))
-		end
-	end
-end)
-
-minimizeButton.MouseButton1Click:Connect(function()
-	mainFrame.Visible = false
-	minButton.Visible = true
-	minButton.Position = mainFrame.Position
-end)
-
-minButton.MouseButton1Click:Connect(function()
-	mainFrame.Visible = true
-	minButton.Visible = false
-end)
-
-refreshButton.MouseButton1Click:Connect(refreshPlayerList)
-refreshPlayerList()
-
-saveButton.MouseButton1Click:Connect(function()
-	if #selectedPlayerItems > 0 then
-		local outfitTitle = currentSelectedPlayer and (currentSelectedPlayer.Name .. "'s Outfit") or ("Outfit #" .. (#savedOutfits + 1))
-		
-		local cleanItems = {}
-		for _, item in ipairs(selectedPlayerItems) do
-			table.insert(cleanItems, {
-				Name = item.Name,
-				ID = item.ID,
-				Type = item.Type,
-				Object = item.Object
-			})
-		end
-
-		table.insert(savedOutfits, {
-			Title = outfitTitle,
-			Items = cleanItems
-		})
-		
-		viewModeButton.Text = showingSavedOutfitsMenu and "🔍 Back to Inspector" or ("📂 View Saved Outfits (" .. #savedOutfits .. ")")
-		saveButton.Text = "Saved! 💖"
-		task.delay(1.5, function()
-			if saveButton and saveButton.Parent then saveButton.Text = "💖 Save Outfit" end
-		end)
-	end
-end)
-
-unequipAllButton.MouseButton1Click:Connect(function()
-	if LocalPlayer.Character then
-		for _, v in ipairs(LocalPlayer.Character:GetChildren()) do
-			if v:IsA("Accessory") or v:IsA("Shirt") or v:IsA("Pants") or v:IsA("BodyColors") or v:IsA("Clothing") then
-				v:Destroy()
-			end
-		end
-		unequipAllButton.Text = "Stripped! ✨"
-		task.delay(1.5, function()
-			if unequipAllButton and unequipAllButton.Parent then unequipAllButton.Text = "🧹 Unequip All" end
-		end)
-	end
-end)
+	showingSavedOutfits
