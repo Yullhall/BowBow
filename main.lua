@@ -1,5 +1,5 @@
 --[[\
-    Berry Avenue Outfit Inspector & Manager (Clean Boot & Stabilized)
+    Berry Avenue Outfit Inspector & Manager (Fixed Boot & Stabilized)
 ]]--
 
 -- Anti-Kick / Anti-Ban Metatable Hook
@@ -718,7 +718,7 @@ saveButton.MouseButton1Click:Connect(function()
 			Items = cleanItems
 		})
 		
-		viewModeButton.Text = showingSavedOutfitsMenu and "🔍 Back to Inspector" or ("📂 View Saved Outfits (" .. #savedOutfits .. ")"
+		viewModeButton.Text = showingSavedOutfitsMenu and "🔍 Back to Inspector" or ("📂 View Saved Outfits (" .. #savedOutfits .. ")")
 		saveButton.Text = "Saved! 💖"
 		task.delay(1.5, function()
 			if saveButton and saveButton.Parent then saveButton.Text = "💖 Save Outfit" end
