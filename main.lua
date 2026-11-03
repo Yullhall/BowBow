@@ -1,45 +1,93 @@
 --[[\
-    Berry Avenue Outfit Inspector & Manager (Mobile-Scaled & Global RAM Memory)
-    Features: Mobile Scaled Dimensions, 3D Preview, Range Status, Deleted Item Image Fallback, Item Creator Fetching, ID Copier, Direct Cloning, Unequip All & Global Saved Outfits Menu.
-    Does NOT use Berry Avenue game slots or write local files.
-    Paste and execute via a script executor.
+    Berry Avenue Outfit Inspector & Manager (Server-Replicated & Direct Equip UI)
 ]]--
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MarketplaceService = game:GetService("MarketplaceService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 local MAX_STREAM_DISTANCE = 300 
 
--- Initialize Persistent Global Memory
 if not getgenv().BerryAvenueSavedOutfits then
 	getgenv().BerryAvenueSavedOutfits = {}
 end
 local savedOutfits = getgenv().BerryAvenueSavedOutfits
 
--- Helper to safely copy text to clipboard
-local function copyToClipboard(text)
-	if setclipboard then
-		setclipboard(tostring(text))
-		print("[Success] Copied ID to clipboard:", text)
-	else
-		print("[Clipboard ID]:", text)
+-- Attempt to locate Berry Avenue's custom remote system for server-wide clothing replication
+local berryRemote = nil
+for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
+	if v:IsA("RemoteEvent") or v:IsA("RemoteFunction") then
+		local nameLower = v.Name:lower()
+		if nameLower:find("cloth") or nameLower:find("avatar") or nameLower:find("item") or nameLower:find("catalog") or nameLower:find("custom") then
+			berryRemote = v
+			break
+		end
 	end
 end
 
--- Prevent duplicate GUIs
+-- Fallback safe equip function that tries server remotes first, then client wrapper
+local function serverEquipItem(assetId, itemType)
+	if not assetId or assetId == "ID Unknown" then return false end
+	local numId = tonumber(assetId)
+	if not numId then return false end
+
+	-- Try triggering Berry Avenue's backend remote if found
+	if berryRemote then
+		pcall(function()
+			if berryRemote:IsA("RemoteEvent") then
+				berryRemote:FireServer(numId, itemType)
+			elseif berryRemote:IsA("RemoteFunction") then
+				berryRemote:InvokeServer(numId, itemType)
+			end
+		end)
+	end
+
+	-- Apply locally as well so it updates instantly for you
+	if LocalPlayer.Character then
+		if itemType == "Shirt" then
+			for _, v in ipairs(LocalPlayer.Character:GetChildren()) do if v:IsA("Shirt") then v:Destroy() end end
+			local s = Instance.new("Shirt")
+			s.ShirtTemplate = "rbxassetid://" .. numId
+			s.Parent = LocalPlayer.Character
+		elseif itemType == "Pants" then
+			for _, v in ipairs(LocalPlayer.Character:GetChildren()) do if v:IsA("Pants") then v:Destroy() end end
+			local p = Instance.new("Pants")
+			p.PantsTemplate = "rbxassetid://" .. numId
+			p.Parent = LocalPlayer.Character
+		elseif itemType == "Accessory" then
+			local success, model = pcall(function()
+				return MarketplaceService:GetProductInfo(numId)
+			end)
+			-- Load accessory via InsertService if possible, or fallback clone
+			pcall(function()
+				local content = game:GetService("InsertService"):LoadAsset(numId)
+				if content then
+					for _, acc in ipairs(content:GetChildren()) do
+						if acc:IsA("Accessory") then
+							for _, old in ipairs(LocalPlayer.Character:GetChildren()) do
+								if old:IsA("Accessory") and old.Name == acc.Name then old:Destroy() end
+							end
+							acc.Parent = LocalPlayer.Character
+						end
+					end
+				end
+			end)
+		end
+	end
+	return true
+end
+
 if PlayerGui:FindFirstChild("OutfitManagerGUI") then
 	PlayerGui.OutfitManagerGUI:Destroy()
 end
 
--- ScreenGui Setup
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "OutfitManagerGUI"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = PlayerGui
 
--- Main Frame (Mobile Scaled Dimensions: 460x380)
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
 mainFrame.Size = UDim2.new(0, 460, 0, 380)
@@ -54,7 +102,6 @@ local mainCorner = Instance.new("UICorner")
 mainCorner.CornerRadius = UDim.new(0, 12)
 mainCorner.Parent = mainFrame
 
--- Header
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, 0, 0, 36)
 title.BackgroundColor3 = Color3.fromRGB(255, 205, 220)
@@ -68,7 +115,6 @@ local titleCorner = Instance.new("UICorner")
 titleCorner.CornerRadius = UDim.new(0, 12)
 titleCorner.Parent = title
 
--- Minimize Button
 local minimizeButton = Instance.new("TextButton")
 minimizeButton.Size = UDim2.new(0, 30, 0, 26)
 minimizeButton.Position = UDim2.new(1, -34, 0, 5)
@@ -83,7 +129,6 @@ local minCorner = Instance.new("UICorner")
 minCorner.CornerRadius = UDim.new(0, 6)
 minCorner.Parent = minimizeButton
 
--- Draggable Minimized Bow Icon
 local minButton = Instance.new("TextButton")
 minButton.Size = UDim2.new(0, 45, 0, 45)
 minButton.Position = UDim2.new(0, 20, 0, 20)
@@ -101,7 +146,6 @@ local minBtnCorner = Instance.new("UICorner")
 minBtnCorner.CornerRadius = UDim.new(1, 0)
 minBtnCorner.Parent = minButton
 
--- Refresh Button
 local refreshButton = Instance.new("TextButton")
 refreshButton.Size = UDim2.new(0, 150, 0, 22)
 refreshButton.Position = UDim2.new(0, 10, 0, 42)
@@ -116,7 +160,6 @@ local refreshCorner = Instance.new("UICorner")
 refreshCorner.CornerRadius = UDim.new(0, 6)
 refreshCorner.Parent = refreshButton
 
--- Left Side: Player List
 local playerListFrame = Instance.new("ScrollingFrame")
 playerListFrame.Size = UDim2.new(0, 150, 0, 302)
 playerListFrame.Position = UDim2.new(0, 10, 0, 68)
@@ -133,7 +176,6 @@ playerListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 playerListLayout.Padding = UDim.new(0, 4)
 playerListLayout.Parent = playerListFrame
 
--- View Mode Toggle Button
 local viewModeButton = Instance.new("TextButton")
 viewModeButton.Size = UDim2.new(0, 280, 0, 22)
 viewModeButton.Position = UDim2.new(0, 170, 0, 42)
@@ -148,7 +190,6 @@ local viewModeCorner = Instance.new("UICorner")
 viewModeCorner.CornerRadius = UDim.new(0, 6)
 viewModeCorner.Parent = viewModeButton
 
--- Right Side Top: 3D Avatar Preview Window
 local avatarViewport = Instance.new("ViewportFrame")
 avatarViewport.Size = UDim2.new(0, 280, 0, 90)
 avatarViewport.Position = UDim2.new(0, 170, 0, 68)
@@ -172,7 +213,6 @@ previewStatusLabel.Text = ""
 previewStatusLabel.Visible = false
 previewStatusLabel.Parent = avatarViewport
 
--- Right Side Bottom: Item Details Frame
 local detailsFrame = Instance.new("ScrollingFrame")
 detailsFrame.Size = UDim2.new(0, 280, 0, 175)
 detailsFrame.Position = UDim2.new(0, 170, 0, 162)
@@ -189,7 +229,6 @@ detailsLayout.SortOrder = Enum.SortOrder.LayoutOrder
 detailsLayout.Padding = UDim.new(0, 4)
 detailsLayout.Parent = detailsFrame
 
--- Bottom Action Buttons
 local saveButton = Instance.new("TextButton")
 saveButton.Size = UDim2.new(0, 136, 0, 28)
 saveButton.Position = UDim2.new(0, 170, 0, 342)
@@ -218,12 +257,10 @@ local unequipAllCorner = Instance.new("UICorner")
 unequipAllCorner.CornerRadius = UDim.new(0, 6)
 unequipAllCorner.Parent = unequipAllButton
 
--- Active States
 local selectedPlayerItems = {}
 local currentSelectedPlayer = nil
 local showingSavedOutfitsMenu = false
 
--- Render 3D Preview
 local function updateAvatarPreview(targetPlayer)
 	for _, child in ipairs(avatarViewport:GetChildren()) do
 		if child:IsA("Model") or child:IsA("Camera") or child:IsA("WorldModel") then
@@ -237,36 +274,26 @@ local function updateAvatarPreview(targetPlayer)
 		return
 	end
 
-	local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart") or targetPlayer.Character:FindFirstChild("Head")
-	local localHRP = LocalPlayer.Character and (LocalPlayer.Character:FindFirstChild("HumanoidRootPart") or LocalPlayer.Character:FindFirstChild("Head"))
+	local head = targetPlayer.Character:FindFirstChild("Head")
+	local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart") or head
 
-	if targetHRP and localHRP then
-		local distance = (targetHRP.Position - localHRP.Position).Magnitude
-		if distance > MAX_STREAM_DISTANCE then
-			previewStatusLabel.Text = "⚠️ Out of range (" .. math.floor(distance) .. " studs)"
-			previewStatusLabel.Visible = true
-			return
-		end
-	end
+	if targetHRP and head then
+		local worldModel = Instance.new("WorldModel")
+		worldModel.Parent = avatarViewport
+		
+		targetPlayer.Character.Archivable = true
+		local charClone = targetPlayer.Character:Clone()
+		targetPlayer.Character.Archivable = false
+		charClone.Parent = worldModel
 
-	previewStatusLabel.Visible = false
-	targetPlayer.Character.Archivable = true
-	local charClone = targetPlayer.Character:Clone()
-	targetPlayer.Character.Archivable = false
-
-	local worldModel = Instance.new("WorldModel")
-	worldModel.Parent = avatarViewport
-	charClone.Parent = worldModel
-
-	if targetHRP then
 		local camera = Instance.new("Camera")
-		camera.CFrame = CFrame.new(targetHRP.Position + (targetHRP.CFrame.LookVector * 5.5) + Vector3.new(0, 2, 0), targetHRP.Position + Vector3.new(0, 1, 0))
+		camera.CFrame = CFrame.new(head.Position + (head.CFrame.LookVector * 3.5) + Vector3.new(0, 0.2, 0), head.Position + Vector3.new(0, -0.2, 0))
 		camera.Parent = avatarViewport
 		avatarViewport.CurrentCamera = camera
+		previewStatusLabel.Visible = false
 	end
 end
 
--- Extract ID helper
 local function extractAssetId(str)
 	if type(str) == "number" and str > 0 then return str end
 	if type(str) == "string" then
@@ -278,14 +305,37 @@ local function extractAssetId(str)
 	return nil
 end
 
--- Inspect player items
 local function getPlayerOutfit(targetPlayer)
 	local items = {}
 	if targetPlayer and targetPlayer.Character then
+		local bodyColors = targetPlayer.Character:FindFirstChildOfClass("BodyColors")
+		if bodyColors then
+			table.insert(items, {
+				Name = "Skin Tone / Body Colors",
+				ID = "SkinTone",
+				Type = "BodyColors",
+				Object = bodyColors:Clone(),
+				IsUnknown = false
+			})
+		end
+
 		for _, child in ipairs(targetPlayer.Character:GetDescendants()) do
 			if child:IsA("Accessory") then
-				local rawId = child:GetAttribute("AssetId") or 0
+				local rawId = child:GetAttribute("AssetId") or child:GetAttribute("Id") or 0
 				local assetId = extractAssetId(rawId)
+				
+				if not assetId then
+					local handle = child:FindFirstChild("Handle")
+					if handle then
+						for _, mesh in ipairs(handle:GetChildren()) do
+							if mesh:IsA("SpecialMesh") or mesh:IsA("MeshPart") then
+								assetId = extractAssetId(mesh.MeshId)
+								if assetId then break end
+							end
+						end
+					end
+				end
+
 				table.insert(items, {
 					Name = child.Name, 
 					ID = assetId or "ID Unknown", 
@@ -322,12 +372,9 @@ local function getPlayerOutfit(targetPlayer)
 	return items
 end
 
--- Display Items with Mobile-Scaled Layout
 local function displayItems(items)
 	for _, child in ipairs(detailsFrame:GetChildren()) do
-		if child:IsA("Frame") then
-			child:Destroy()
-		end
+		if child:IsA("Frame") then child:Destroy() end
 	end
 	
 	selectedPlayerItems = items
@@ -342,7 +389,6 @@ local function displayItems(items)
 		rowCorner.CornerRadius = UDim.new(0, 6)
 		rowCorner.Parent = itemRow
 
-		-- Thumbnail Container
 		local imgFrame = Instance.new("Frame")
 		imgFrame.Size = UDim2.new(0, 36, 0, 36)
 		imgFrame.Position = UDim2.new(0, 5, 0.5, -18)
@@ -360,7 +406,15 @@ local function displayItems(items)
 		itemImg.BackgroundTransparency = 1
 		itemImg.Parent = imgFrame
 
-		if not itemInfo.IsUnknown and itemInfo.ID and itemInfo.ID ~= "ID Unknown" then
+		if itemInfo.Type == "BodyColors" then
+			itemImg:Destroy()
+			local placeholderLabel = Instance.new("TextLabel")
+			placeholderLabel.Size = UDim2.new(1, 0, 1, 0)
+			placeholderLabel.BackgroundTransparency = 1
+			placeholderLabel.Text = "🎨"
+			placeholderLabel.TextSize = 16
+			placeholderLabel.Parent = imgFrame
+		elseif not itemInfo.IsUnknown and itemInfo.ID and itemInfo.ID ~= "ID Unknown" then
 			itemImg.Image = "rbxthumb://type=Asset&id=" .. tostring(itemInfo.ID) .. "&w=150&h=150"
 		else
 			local directImage = ""
@@ -391,9 +445,8 @@ local function displayItems(items)
 			end
 		end
 
-		-- Item Name
 		local nameLabel = Instance.new("TextLabel")
-		nameLabel.Size = UDim2.new(0, 115, 0, 14)
+		nameLabel.Size = UDim2.new(0, 160, 0, 14)
 		nameLabel.Position = UDim2.new(0, 46, 0, 4)
 		nameLabel.BackgroundTransparency = 1
 		nameLabel.TextColor3 = itemInfo.IsUnknown and Color3.fromRGB(150, 40, 50) or Color3.fromRGB(90, 50, 65)
@@ -404,9 +457,8 @@ local function displayItems(items)
 		nameLabel.Text = itemInfo.Name
 		nameLabel.Parent = itemRow
 
-		-- Creator Name Label
 		local creatorLabel = Instance.new("TextLabel")
-		creatorLabel.Size = UDim2.new(0, 115, 0, 12)
+		creatorLabel.Size = UDim2.new(0, 160, 0, 12)
 		creatorLabel.Position = UDim2.new(0, 46, 0, 18)
 		creatorLabel.BackgroundTransparency = 1
 		creatorLabel.TextColor3 = Color3.fromRGB(120, 80, 95)
@@ -414,12 +466,11 @@ local function displayItems(items)
 		creatorLabel.Font = Enum.Font.GothamMedium
 		creatorLabel.TextXAlignment = Enum.TextXAlignment.Left
 		creatorLabel.TextTruncate = Enum.TextTruncate.AtEnd
-		creatorLabel.Text = itemInfo.IsUnknown and "Creator: Game Asset" or "Creator: Loading..."
+		creatorLabel.Text = itemInfo.Type == "BodyColors" and "Skin Tone" or (itemInfo.IsUnknown and "Creator: Game Asset" or "Creator: Loading...")
 		creatorLabel.Parent = itemRow
 
-		-- ID Label
 		local idLabel = Instance.new("TextLabel")
-		idLabel.Size = UDim2.new(0, 115, 0, 12)
+		idLabel.Size = UDim2.new(0, 160, 0, 12)
 		idLabel.Position = UDim2.new(0, 46, 0, 30)
 		idLabel.BackgroundTransparency = 1
 		idLabel.TextColor3 = Color3.fromRGB(140, 90, 105)
@@ -429,8 +480,7 @@ local function displayItems(items)
 		idLabel.Text = "ID: " .. tostring(itemInfo.ID)
 		idLabel.Parent = itemRow
 
-		-- Async Fetch Creator Name
-		if not itemInfo.IsUnknown and itemInfo.ID and itemInfo.ID ~= "ID Unknown" then
+		if not itemInfo.IsUnknown and itemInfo.ID and itemInfo.ID ~= "ID Unknown" and itemInfo.Type ~= "BodyColors" then
 			task.spawn(function()
 				local success, info = pcall(function()
 					return MarketplaceService:GetProductInfo(tonumber(itemInfo.ID), Enum.InfoType.Asset)
@@ -443,83 +493,42 @@ local function displayItems(items)
 			end)
 		end
 
-		-- Copy ID Button
-		local copyBtn = Instance.new("TextButton")
-		copyBtn.Size = UDim2.new(0, 50, 0, 22)
-		copyBtn.Position = UDim2.new(1, -108, 0.5, -11)
-		copyBtn.BackgroundColor3 = Color3.fromRGB(230, 180, 210)
-		copyBtn.TextColor3 = Color3.fromRGB(100, 50, 75)
-		copyBtn.TextSize = 9
-		copyBtn.Font = Enum.Font.GothamBold
-		copyBtn.Text = "📋 Copy"
-		copyBtn.Parent = itemRow
-
-		local copyCorner = Instance.new("UICorner")
-		copyCorner.CornerRadius = UDim.new(0, 4)
-		copyCorner.Parent = copyBtn
-
-		copyBtn.MouseButton1Click:Connect(function()
-			if itemInfo.ID and itemInfo.ID ~= "ID Unknown" then
-				copyToClipboard(itemInfo.ID)
-				copyBtn.Text = "Copied! 💖"
-			else
-				copyBtn.Text = "N/A"
-			end
-			task.delay(1.5, function()
-				if copyBtn and copyBtn.Parent then
-					copyBtn.Text = "📋 Copy"
-				end
-			end)
-		end)
-
-		-- Equip Button
+		-- Replaced Copy Button with Direct Server Equip Button
 		local equipBtn = Instance.new("TextButton")
-		equipBtn.Size = UDim2.new(0, 50, 0, 22)
-		equipBtn.Position = UDim2.new(1, -54, 0.5, -11)
+		equipBtn.Size = UDim2.new(0, 60, 0, 30)
+		equipBtn.Position = UDim2.new(1, -65, 0.5, -15)
 		equipBtn.BackgroundColor3 = itemInfo.IsUnknown and Color3.fromRGB(220, 110, 130) or Color3.fromRGB(255, 165, 195)
 		equipBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-		equipBtn.TextSize = 9
+		equipBtn.TextSize = 10
 		equipBtn.Font = Enum.Font.GothamBold
-		equipBtn.Text = itemInfo.IsUnknown and "Clone" or "Equip"
+		equipBtn.Text = "✨ Equip"
 		equipBtn.Parent = itemRow
 
 		local equipCorner = Instance.new("UICorner")
-		equipCorner.CornerRadius = UDim.new(0, 4)
+		equipCorner.CornerRadius = UDim.new(0, 6)
 		equipCorner.Parent = equipBtn
 
 		equipBtn.MouseButton1Click:Connect(function()
-			if LocalPlayer.Character and itemInfo.Object and itemInfo.Object.Parent then
-				local clone = itemInfo.Object:Clone()
-				
-				if itemInfo.Type == "Accessory" then
-					for _, v in ipairs(LocalPlayer.Character:GetChildren()) do
-						if v:IsA("Accessory") and v.Name == clone.Name then v:Destroy() end
-					end
-				elseif itemInfo.Type == "Shirt" then
-					for _, v in ipairs(LocalPlayer.Character:GetChildren()) do
-						if v:IsA("Shirt") then v:Destroy() end
-					end
-				elseif itemInfo.Type == "Pants" then
-					for _, v in ipairs(LocalPlayer.Character:GetChildren()) do
-						if v:IsA("Pants") then v:Destroy() end
-					end
+			if itemInfo.Type == "BodyColors" then
+				if LocalPlayer.Character then
+					local oldColors = LocalPlayer.Character:FindFirstChildOfClass("BodyColors")
+					if oldColors then oldColors:Destroy() end
+					itemInfo.Object:Clone().Parent = LocalPlayer.Character
 				end
-				
-				clone.Parent = LocalPlayer.Character
-				equipBtn.Text = "Done! ✨"
-				task.delay(1.5, function()
-					if equipBtn and equipBtn.Parent then
-						equipBtn.Text = itemInfo.IsUnknown and "Clone" or "Equip"
-					end
-				end)
+			else
+				serverEquipItem(itemInfo.ID, itemInfo.Type)
 			end
+
+			equipBtn.Text = "Equipped!"
+			task.delay(1.5, function()
+				if equipBtn and equipBtn.Parent then equipBtn.Text = "✨ Equip" end
+			end)
 		end)
 	end
 	
 	detailsFrame.CanvasSize = UDim2.new(0, 0, 0, #items * 52)
 end
 
--- Render Saved Outfits Menu
 local function displaySavedOutfitsMenu()
 	for _, child in ipairs(detailsFrame:GetChildren()) do
 		if child:IsA("Frame") then child:Destroy() end
@@ -559,7 +568,6 @@ local function displaySavedOutfitsMenu()
 		nameLabel.Text = outfitData.Title or ("Outfit #" .. index)
 		nameLabel.Parent = row
 
-		-- Delete Button
 		local deleteBtn = Instance.new("TextButton")
 		deleteBtn.Size = UDim2.new(0, 55, 0, 22)
 		deleteBtn.Position = UDim2.new(1, -60, 0.5, -11)
@@ -580,7 +588,6 @@ local function displaySavedOutfitsMenu()
 			displaySavedOutfitsMenu()
 		end)
 
-		-- Equip All Button
 		local equipAllSavedBtn = Instance.new("TextButton")
 		equipAllSavedBtn.Size = UDim2.new(0, 65, 0, 22)
 		equipAllSavedBtn.Position = UDim2.new(1, -130, 0.5, -11)
@@ -592,18 +599,22 @@ local function displaySavedOutfitsMenu()
 		equipAllSavedBtn.Parent = row
 
 		equipAllSavedBtn.MouseButton1Click:Connect(function()
-			if LocalPlayer.Character and outfitData.Items then
+			if outfitData.Items then
 				for _, item in ipairs(outfitData.Items) do
-					if item.Object and item.Object.Parent then
-						local clone = item.Object:Clone()
-						clone.Parent = LocalPlayer.Character
+					if item.Type == "BodyColors" then
+						if LocalPlayer.Character then
+							local oldColors = LocalPlayer.Character:FindFirstChildOfClass("BodyColors")
+							if oldColors then oldColors:Destroy() end
+							item.Object:Clone().Parent = LocalPlayer.Character
+						end
+					else
+						serverEquipItem(item.ID, item.Type)
+						task.wait(0.1)
 					end
 				end
 				equipAllSavedBtn.Text = "Done! 💖"
 				task.delay(1.5, function()
-					if equipAllSavedBtn and equipAllSavedBtn.Parent then
-						equipAllSavedBtn.Text = "✨ Equip All"
-					end
+					if equipAllSavedBtn and equipAllSavedBtn.Parent then equipAllSavedBtn.Text = "✨ Equip All" end
 				end)
 			end
 		end)
@@ -612,7 +623,6 @@ local function displaySavedOutfitsMenu()
 	detailsFrame.CanvasSize = UDim2.new(0, 0, 0, #savedOutfits * 44)
 end
 
--- Refresh Player List
 local function refreshPlayerList()
 	for _, child in ipairs(playerListFrame:GetChildren()) do
 		if child:IsA("TextButton") then child:Destroy() end
@@ -648,7 +658,6 @@ local function refreshPlayerList()
 	playerListFrame.CanvasSize = UDim2.new(0, 0, 0, #playersList * 34)
 end
 
--- Toggle View Mode
 viewModeButton.MouseButton1Click:Connect(function()
 	showingSavedOutfitsMenu = not showingSavedOutfitsMenu
 	if showingSavedOutfitsMenu then
@@ -662,7 +671,6 @@ viewModeButton.MouseButton1Click:Connect(function()
 	end
 end)
 
--- UI Toggle Connections
 minimizeButton.MouseButton1Click:Connect(function()
 	mainFrame.Visible = false
 	minButton.Visible = true
@@ -677,7 +685,6 @@ end)
 refreshButton.MouseButton1Click:Connect(refreshPlayerList)
 refreshPlayerList()
 
--- Save Outfit to Global Memory
 saveButton.MouseButton1Click:Connect(function()
 	if #selectedPlayerItems > 0 then
 		local outfitTitle = currentSelectedPlayer and (currentSelectedPlayer.Name .. "'s Outfit") or ("Outfit #" .. (#savedOutfits + 1))
@@ -700,26 +707,21 @@ saveButton.MouseButton1Click:Connect(function()
 		viewModeButton.Text = showingSavedOutfitsMenu and "🔍 Back to Inspector" or ("📂 View Saved Outfits (" .. #savedOutfits .. ")")
 		saveButton.Text = "Saved! 💖"
 		task.delay(1.5, function()
-			if saveButton and saveButton.Parent then
-				saveButton.Text = "💖 Save Outfit"
-			end
+			if saveButton and saveButton.Parent then saveButton.Text = "💖 Save Outfit" end
 		end)
 	end
 end)
 
--- Unequip All
 unequipAllButton.MouseButton1Click:Connect(function()
 	if LocalPlayer.Character then
 		for _, v in ipairs(LocalPlayer.Character:GetChildren()) do
-			if v:IsA("Accessory") or v:IsA("Shirt") or v:IsA("Pants") or v:IsA("Clothing") then
+			if v:IsA("Accessory") or v:IsA("Shirt") or v:IsA("Pants") or v:IsA("BodyColors") or v:IsA("Clothing") then
 				v:Destroy()
 			end
 		end
 		unequipAllButton.Text = "Stripped! ✨"
 		task.delay(1.5, function()
-			if unequipAllButton and unequipAllButton.Parent then
-				unequipAllButton.Text = "🧹 Unequip All"
-			end
+			if unequipAllButton and unequipAllButton.Parent then unequipAllButton.Text = "🧹 Unequip All" end
 		end)
 	end
 end)
