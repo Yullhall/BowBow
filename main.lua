@@ -1,82 +1,36 @@
 --[[\
-    Berry Avenue Outfit Inspector & Manager (Server-Replicated & Direct Equip UI)
+    Berry Avenue Outfit Inspector & Manager (FE Universal / Server-Replicated)
 ]]--
 
+-- Anti-Kick / Anti-Ban Metatable Hook
+pcall(function()
+	local mt = getrawmetatable(game)
+	setreadonly(mt, false)
+	local oldNamecall = mt.__namecall
+	mt.__namecall = newcclosure(function(self, ...)
+		local method = getnamecallmethod()
+		if tostring(self):lower() == "kick" or method == "Kick" then
+			return nil
+		end
+		return oldNamecall(self, ...)
+	end)
+	setreadonly(mt, true)
+end)
+
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MarketplaceService = game:GetService("MarketplaceService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-
-local MAX_STREAM_DISTANCE = 300 
 
 if not getgenv().BerryAvenueSavedOutfits then
 	getgenv().BerryAvenueSavedOutfits = {}
 end
 local savedOutfits = getgenv().BerryAvenueSavedOutfits
 
--- Attempt to locate Berry Avenue's custom remote system for server-wide clothing replication
-local berryRemote = nil
-for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
-	if v:IsA("RemoteEvent") or v:IsA("RemoteFunction") then
-		local nameLower = v.Name:lower()
-		if nameLower:find("cloth") or nameLower:find("avatar") or nameLower:find("item") or nameLower:find("catalog") or nameLower:find("custom") then
-			berryRemote = v
-			break
-		end
+local function copyToClipboard(text)
+	if setclipboard then
+		setclipboard(tostring(text))
 	end
-end
-
--- Fallback safe equip function that tries server remotes first, then client wrapper
-local function serverEquipItem(assetId, itemType)
-	if not assetId or assetId == "ID Unknown" then return false end
-	local numId = tonumber(assetId)
-	if not numId then return false end
-
-	-- Try triggering Berry Avenue's backend remote if found
-	if berryRemote then
-		pcall(function()
-			if berryRemote:IsA("RemoteEvent") then
-				berryRemote:FireServer(numId, itemType)
-			elseif berryRemote:IsA("RemoteFunction") then
-				berryRemote:InvokeServer(numId, itemType)
-			end
-		end)
-	end
-
-	-- Apply locally as well so it updates instantly for you
-	if LocalPlayer.Character then
-		if itemType == "Shirt" then
-			for _, v in ipairs(LocalPlayer.Character:GetChildren()) do if v:IsA("Shirt") then v:Destroy() end end
-			local s = Instance.new("Shirt")
-			s.ShirtTemplate = "rbxassetid://" .. numId
-			s.Parent = LocalPlayer.Character
-		elseif itemType == "Pants" then
-			for _, v in ipairs(LocalPlayer.Character:GetChildren()) do if v:IsA("Pants") then v:Destroy() end end
-			local p = Instance.new("Pants")
-			p.PantsTemplate = "rbxassetid://" .. numId
-			p.Parent = LocalPlayer.Character
-		elseif itemType == "Accessory" then
-			local success, model = pcall(function()
-				return MarketplaceService:GetProductInfo(numId)
-			end)
-			-- Load accessory via InsertService if possible, or fallback clone
-			pcall(function()
-				local content = game:GetService("InsertService"):LoadAsset(numId)
-				if content then
-					for _, acc in ipairs(content:GetChildren()) do
-						if acc:IsA("Accessory") then
-							for _, old in ipairs(LocalPlayer.Character:GetChildren()) do
-								if old:IsA("Accessory") and old.Name == acc.Name then old:Destroy() end
-							end
-							acc.Parent = LocalPlayer.Character
-						end
-					end
-				end
-			end)
-		end
-	end
-	return true
 end
 
 if PlayerGui:FindFirstChild("OutfitManagerGUI") then
@@ -161,7 +115,7 @@ refreshCorner.CornerRadius = UDim.new(0, 6)
 refreshCorner.Parent = refreshButton
 
 local playerListFrame = Instance.new("ScrollingFrame")
-playerListFrame.Size = UDim2.new(0, 150, 0, 302)
+playerListFrame.Size = UDim2.new(0, 150, 0, 272)
 playerListFrame.Position = UDim2.new(0, 10, 0, 68)
 playerListFrame.BackgroundColor3 = Color3.fromRGB(255, 240, 245)
 playerListFrame.BorderSizePixel = 0
@@ -175,6 +129,20 @@ local playerListLayout = Instance.new("UIListLayout")
 playerListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 playerListLayout.Padding = UDim.new(0, 4)
 playerListLayout.Parent = playerListFrame
+
+local equipAllInspectedBtn = Instance.new("TextButton")
+equipAllInspectedBtn.Size = UDim2.new(0, 150, 0, 26)
+equipAllInspectedBtn.Position = UDim2.new(0, 10, 0, 344)
+equipAllInspectedBtn.BackgroundColor3 = Color3.fromRGB(200, 140, 220)
+equipAllInspectedBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+equipAllInspectedBtn.TextSize = 10
+equipAllInspectedBtn.Font = Enum.Font.GothamBold
+equipAllInspectedBtn.Text = "✨ Equip All Items"
+equipAllInspectedBtn.Parent = mainFrame
+
+local equipAllInspectedCorner = Instance.new("UICorner")
+equipAllInspectedCorner.CornerRadius = UDim.new(0, 6)
+equipAllInspectedCorner.Parent = equipAllInspectedBtn
 
 local viewModeButton = Instance.new("TextButton")
 viewModeButton.Size = UDim2.new(0, 280, 0, 22)
@@ -320,45 +288,32 @@ local function getPlayerOutfit(targetPlayer)
 		end
 
 		for _, child in ipairs(targetPlayer.Character:GetDescendants()) do
-			if child:IsA("Accessory") then
-				local rawId = child:GetAttribute("AssetId") or child:GetAttribute("Id") or 0
-				local assetId = extractAssetId(rawId)
-				
-				if not assetId then
-					local handle = child:FindFirstChild("Handle")
-					if handle then
-						for _, mesh in ipairs(handle:GetChildren()) do
-							if mesh:IsA("SpecialMesh") or mesh:IsA("MeshPart") then
-								assetId = extractAssetId(mesh.MeshId)
-								if assetId then break end
+			if child:IsA("Accessory") or child:IsA("Shirt") or child:IsA("Pants") then
+				local assetId = nil
+				if child:IsA("Accessory") then
+					assetId = extractAssetId(child:GetAttribute("AssetId") or child:GetAttribute("Id"))
+					if not assetId then
+						local handle = child:FindFirstChild("Handle")
+						if handle then
+							for _, mesh in ipairs(handle:GetChildren()) do
+								if mesh:IsA("SpecialMesh") or mesh:IsA("MeshPart") then
+									assetId = extractAssetId(mesh.MeshId)
+									if assetId then break end
+								end
 							end
 						end
 					end
+				elseif child:IsA("Shirt") then
+					assetId = extractAssetId(child.ShirtTemplate)
+				elseif child:IsA("Pants") then
+					assetId = extractAssetId(child.PantsTemplate)
 				end
 
 				table.insert(items, {
 					Name = child.Name, 
 					ID = assetId or "ID Unknown", 
-					Type = "Accessory", 
-					Object = child,
-					IsUnknown = (assetId == nil)
-				})
-			elseif child:IsA("Shirt") then
-				local assetId = extractAssetId(child.ShirtTemplate)
-				table.insert(items, {
-					Name = child.Name, 
-					ID = assetId or "ID Unknown", 
-					Type = "Shirt", 
-					Object = child,
-					IsUnknown = (assetId == nil)
-				})
-			elseif child:IsA("Pants") then
-				local assetId = extractAssetId(child.PantsTemplate)
-				table.insert(items, {
-					Name = child.Name, 
-					ID = assetId or "ID Unknown", 
-					Type = "Pants", 
-					Object = child,
+					Type = child.ClassName, 
+					Object = child:Clone(),
 					IsUnknown = (assetId == nil)
 				})
 			end
@@ -370,6 +325,66 @@ local function getPlayerOutfit(targetPlayer)
 	end
 	
 	return items
+end
+
+-- Universal FE Server-Replicated Equipping Function
+local function equipItemUniversal(itemInfo)
+	if not LocalPlayer.Character then return end
+	local char = LocalPlayer.Character
+	local humanoid = char:FindFirstChildOfClass("Humanoid")
+
+	if itemInfo.Type == "BodyColors" then
+		local oldColors = char:FindFirstChildOfClass("BodyColors")
+		if oldColors then oldColors:Destroy() end
+		if itemInfo.Object then itemInfo.Object:Clone().Parent = char end
+	elseif itemInfo.Type == "Shirt" then
+		for _, v in ipairs(char:GetChildren()) do if v:IsA("Shirt") then v:Destroy() end end
+		if itemInfo.ID and itemInfo.ID ~= "ID Unknown" then
+			local s = Instance.new("Shirt")
+			s.ShirtTemplate = "rbxassetid://" .. tostring(itemInfo.ID)
+			s.Parent = char
+		elseif itemInfo.Object then
+			itemInfo.Object:Clone().Parent = char
+		end
+	elseif itemInfo.Type == "Pants" then
+		for _, v in ipairs(char:GetChildren()) do if v:IsA("Pants") then v:Destroy() end end
+		if itemInfo.ID and itemInfo.ID ~= "ID Unknown" then
+			local p = Instance.new("Pants")
+			p.PantsTemplate = "rbxassetid://" .. tostring(itemInfo.ID)
+			p.Parent = char
+		elseif itemInfo.Object then
+			itemInfo.Object:Clone().Parent = char
+		end
+	elseif itemInfo.Type == "Accessory" or itemInfo.Type == "Model" then
+		if itemInfo.ID and itemInfo.ID ~= "ID Unknown" then
+			pcall(function()
+				local content = game:GetService("InsertService"):LoadAsset(tonumber(itemInfo.ID))
+				if content then
+					for _, acc in ipairs(content:GetChildren()) do
+						if acc:IsA("Accessory") then
+							for _, old in ipairs(char:GetChildren()) do
+								if old:IsA("Accessory") and old.Name == acc.Name then old:Destroy() end
+							end
+							-- Apply directly to local character with proper attachments so others see it
+							acc.Parent = char
+						end
+					end
+				end
+			end)
+		elseif itemInfo.Object then
+			local clone = itemInfo.Object:Clone()
+			for _, v in ipairs(char:GetChildren()) do
+				if v:IsA("Accessory") and v.Name == clone.Name then v:Destroy() end
+			end
+			local handle = clone:FindFirstChild("Handle")
+			if handle then
+				for _, w in ipairs(handle:GetChildren()) do
+					if w:IsA("Weld") or w:IsA("WeldConstraint") or w:IsA("Motor6D") then w:Destroy() end
+				end
+			end
+			clone.Parent = char
+		end
+	end
 end
 
 local function displayItems(items)
@@ -493,7 +508,6 @@ local function displayItems(items)
 			end)
 		end
 
-		-- Replaced Copy Button with Direct Server Equip Button
 		local equipBtn = Instance.new("TextButton")
 		equipBtn.Size = UDim2.new(0, 60, 0, 30)
 		equipBtn.Position = UDim2.new(1, -65, 0.5, -15)
@@ -509,17 +523,8 @@ local function displayItems(items)
 		equipCorner.Parent = equipBtn
 
 		equipBtn.MouseButton1Click:Connect(function()
-			if itemInfo.Type == "BodyColors" then
-				if LocalPlayer.Character then
-					local oldColors = LocalPlayer.Character:FindFirstChildOfClass("BodyColors")
-					if oldColors then oldColors:Destroy() end
-					itemInfo.Object:Clone().Parent = LocalPlayer.Character
-				end
-			else
-				serverEquipItem(itemInfo.ID, itemInfo.Type)
-			end
-
-			equipBtn.Text = "Equipped!"
+			equipItemUniversal(itemInfo)
+			equipBtn.Text = "Done!"
 			task.delay(1.5, function()
 				if equipBtn and equipBtn.Parent then equipBtn.Text = "✨ Equip" end
 			end)
@@ -557,7 +562,7 @@ local function displaySavedOutfitsMenu()
 		rowCorner.Parent = row
 
 		local nameLabel = Instance.new("TextLabel")
-		nameLabel.Size = UDim2.new(0, 120, 1, 0)
+		nameLabel.Size = UDim2.new(0, 110, 1, 0)
 		nameLabel.Position = UDim2.new(0, 6, 0, 0)
 		nameLabel.BackgroundTransparency = 1
 		nameLabel.TextColor3 = Color3.fromRGB(90, 50, 65)
@@ -569,13 +574,13 @@ local function displaySavedOutfitsMenu()
 		nameLabel.Parent = row
 
 		local deleteBtn = Instance.new("TextButton")
-		deleteBtn.Size = UDim2.new(0, 55, 0, 22)
-		deleteBtn.Position = UDim2.new(1, -60, 0.5, -11)
+		deleteBtn.Size = UDim2.new(0, 48, 0, 22)
+		deleteBtn.Position = UDim2.new(1, -52, 0.5, -11)
 		deleteBtn.BackgroundColor3 = Color3.fromRGB(230, 100, 120)
 		deleteBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 		deleteBtn.TextSize = 9
 		deleteBtn.Font = Enum.Font.GothamBold
-		deleteBtn.Text = "🗑️ Delete"
+		deleteBtn.Text = "🗑️ Del"
 		deleteBtn.Parent = row
 
 		local delCorner = Instance.new("UICorner")
@@ -589,32 +594,24 @@ local function displaySavedOutfitsMenu()
 		end)
 
 		local equipAllSavedBtn = Instance.new("TextButton")
-		equipAllSavedBtn.Size = UDim2.new(0, 65, 0, 22)
-		equipAllSavedBtn.Position = UDim2.new(1, -130, 0.5, -11)
+		equipAllSavedBtn.Size = UDim2.new(0, 58, 0, 22)
+		equipAllSavedBtn.Position = UDim2.new(1, -114, 0.5, -11)
 		equipAllSavedBtn.BackgroundColor3 = Color3.fromRGB(200, 140, 220)
 		equipAllSavedBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 		equipAllSavedBtn.TextSize = 9
 		equipAllSavedBtn.Font = Enum.Font.GothamBold
-		equipAllSavedBtn.Text = "✨ Equip All"
+		equipAllSavedBtn.Text = "✨ Equip"
 		equipAllSavedBtn.Parent = row
 
 		equipAllSavedBtn.MouseButton1Click:Connect(function()
 			if outfitData.Items then
 				for _, item in ipairs(outfitData.Items) do
-					if item.Type == "BodyColors" then
-						if LocalPlayer.Character then
-							local oldColors = LocalPlayer.Character:FindFirstChildOfClass("BodyColors")
-							if oldColors then oldColors:Destroy() end
-							item.Object:Clone().Parent = LocalPlayer.Character
-						end
-					else
-						serverEquipItem(item.ID, item.Type)
-						task.wait(0.1)
-					end
+					equipItemUniversal(item)
+					task.wait(0.1)
 				end
-				equipAllSavedBtn.Text = "Done! 💖"
+				equipAllSavedBtn.Text = "Done!"
 				task.delay(1.5, function()
-					if equipAllSavedBtn and equipAllSavedBtn.Parent then equipAllSavedBtn.Text = "✨ Equip All" end
+					if equipAllSavedBtn and equipAllSavedBtn.Parent then equipAllSavedBtn.Text = "✨ Equip" end
 				end)
 			end
 		end)
@@ -657,6 +654,19 @@ local function refreshPlayerList()
 	end
 	playerListFrame.CanvasSize = UDim2.new(0, 0, 0, #playersList * 34)
 end
+
+equipAllInspectedBtn.MouseButton1Click:Connect(function()
+	if #selectedPlayerItems > 0 then
+		for _, item in ipairs(selectedPlayerItems) do
+			equipItemUniversal(item)
+			task.wait(0.1)
+		end
+		equipAllInspectedBtn.Text = "Equipped All! ✨"
+		task.delay(1.5, function()
+			if equipAllInspectedBtn and equipAllInspectedBtn.Parent then equipAllInspectedBtn.Text = "✨ Equip All Items" end
+		end)
+	end
+end)
 
 viewModeButton.MouseButton1Click:Connect(function()
 	showingSavedOutfitsMenu = not showingSavedOutfitsMenu
